@@ -8,6 +8,10 @@ import (
 	"runtime"
 	"sync"
 	"time"
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"strings"
 
 	"v2ray.com/core/app"
 	"v2ray.com/core/app/dispatcher"
@@ -32,6 +36,25 @@ type userByEmail struct {
 	cache           map[string]*protocol.User
 	defaultLevel    uint32
 	defaultAlterIDs uint16
+}
+
+func notifyPanelBackend(path string, rawData interface{}) {
+	go func() {
+		defer func() {
+			if err := recover(); err != nil {
+				log.Trace(newError("Error while notifying panel backend: ", err))
+			}
+		}()
+		data, err := json.Marshal(rawData)
+		if err != nil {
+			panic(err)
+		}
+		resp, err := http.Post("http://127.0.0.1:5212" + path, "application/json", bytes.NewReader(data))
+		if err != nil {
+			panic(err)
+		}
+		resp.Body.Close()
+	}()
 }
 
 func NewUserByEmail(users []*protocol.User, config *DefaultConfig) *userByEmail {
@@ -198,6 +221,14 @@ func (v *Handler) Process(ctx context.Context, network net.Network, connection i
 
 	log.Access(connection.RemoteAddr(), request.Destination(), log.AccessAccepted, "")
 	log.Trace(newError("received request for ", request.Destination()))
+	log.Trace(newError("RemoteAddr: ", connection.RemoteAddr().String()));
+
+	remoteAddrParts := strings.Split(connection.RemoteAddr().String(), ":")
+	notifyPanelBackend("/connection/add", map[string]interface{} {
+		"remote_ip": remoteAddrParts[0],
+		"remote_port": remoteAddrParts[1],
+		"user_id": request.User.Email,
+	})
 
 	common.Must(connection.SetReadDeadline(time.Time{}))
 
