@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"io/ioutil"
 
 	"v2ray.com/core/app"
 	"v2ray.com/core/app/dispatcher"
@@ -38,7 +39,7 @@ type userByEmail struct {
 	defaultAlterIDs uint16
 }
 
-func notifyPanelBackend(path string, rawData interface{}) {
+func notifyPanelBackend(path string, rawData interface{}, cb func (*http.Response)) {
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
@@ -53,7 +54,7 @@ func notifyPanelBackend(path string, rawData interface{}) {
 		if err != nil {
 			panic(err)
 		}
-		resp.Body.Close()
+		cb(resp)
 	}()
 }
 
@@ -228,6 +229,17 @@ func (v *Handler) Process(ctx context.Context, network net.Network, connection i
 		"remote_ip": remoteAddrParts[0],
 		"remote_port": remoteAddrParts[1],
 		"user_id": request.User.Email,
+	}, func (resp *http.Response) {
+		defer resp.Body.Close()
+		rawData, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return
+		}
+		data := string(rawData)
+		if data != "OK" {
+			log.Trace(newError("Error while adding connection: ", data))
+			connection.Close()
+		}
 	})
 
 	common.Must(connection.SetReadDeadline(time.Time{}))
